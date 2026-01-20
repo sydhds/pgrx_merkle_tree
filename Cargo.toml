@@ -1,5 +1,6 @@
 [workspace]
 members = [
-    "pg_merkle_tree"
+    "pg_merkle_tree",
+    "sqlx_binary_protocol"
 ]
 resolver = "3"
