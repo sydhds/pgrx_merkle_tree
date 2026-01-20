@@ -1333,6 +1333,8 @@ dependencies = [
  "ark-bn254",
  "ark-ff 0.5.0 (git+https://github.com/arkworks-rs/algebra)",
  "ark-serialize 0.5.0 (git+https://github.com/arkworks-rs/algebra)",
+ "num-bigint",
+ "once_cell",
  "pgrx",
  "pgrx-tests",
  "static_assertions",

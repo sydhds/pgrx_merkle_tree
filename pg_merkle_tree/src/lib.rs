@@ -1,3 +1,7 @@
+mod merkle_tree;
+mod poseidon;
+mod merkle_tree_utils;
+
 // std
 use std::ffi::CStr;
 use std::str::FromStr;
@@ -311,7 +315,7 @@ mod tests {
         let mut raw_bytes = Vec::new();
         expected_fr.serialize_compressed(&mut raw_bytes).unwrap();
         let string_info_ptr = pg_sys::makeStringInfo();
-        // Rust doc for 2nd arg should be *const i8 but compilo requires *conv c_void...
+        // Rust doc for 2nd arg should be *const i8 but compilo requires *const c_void...
         pg_sys::appendBinaryStringInfo(
             string_info_ptr,
             raw_bytes.as_ptr() as *const c_void,
