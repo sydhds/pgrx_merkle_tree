@@ -1,0 +1,5 @@
+[workspace]
+members = [
+    "pg_merkle_tree"
+]
+resolver = "3"
