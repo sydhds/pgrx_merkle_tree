@@ -8,6 +8,8 @@ A postgresql extension (using pgrx) to store a merkle tree in a Postgresql DB
 * A merkle tree is stored in a Postgresql table (One tree per table)
   * The hashing function is the Poseidon hash function 
   * A set of postgresql functions are provided to manipulate the tree (tree initialization, get root, update leaf, get proof)
+* The following example are provided to illustrate the usage of the extension using the Postgresql binary protocol:
+  * sqlx_binary_protocol
 
 ## Limitations
 
@@ -43,3 +45,12 @@ psql:
 * Listing data types: `\dT+`
 * Listing functions: `\df+`
 * Enable timing: `\timing`
+
+## sqlx_binary_protocol
+
+### Run
+
+* Start the psql shell with the pg extension loaded and merkle tree initialized
+* `cargo run -- DB_URL`
+* View queries:
+    * `RUST_LOG=sqlx=debug cargo run -- DB_URL` 
