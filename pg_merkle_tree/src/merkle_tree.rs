@@ -1,12 +1,14 @@
-use std::collections::BTreeMap;
 // std
-use std::iter::repeat_n;
+use std::collections::BTreeMap;
 // third-party
 use ark_bn254::Fr;
-use pgrx::datum::DatumWithOid;
+use ark_serialize::CanonicalSerialize;
 // pgrx
-use pgrx::prelude::*;
-use pgrx::spi::{SpiClient, SpiResult};
+use pgrx::{
+    spi::{SpiClient, SpiResult},
+    prelude::*,
+    datum::DatumWithOid
+};
 use crate::PgFr;
 use crate::poseidon::poseidon_hash_;
 use crate::merkle_tree_utils::{node_parent, first_child};
@@ -16,35 +18,39 @@ fn pgfr_mtree_init(depth: i64) {
 
     let depth = depth as usize;
 
-    // initialize merkle tree nodes (root, nodes & leaves)
-    let mut levels = Vec::with_capacity(depth + 1);
-    levels.push(Fr::default());
+    // Note: init the merkle tree as 1 hash / level of the tree
+    //       so we can insert into the tree with only a few queries
+    let mut level_hashes = Vec::with_capacity(depth + 1);
+    level_hashes.push(Fr::default()); // set the initial leaf value
+    // Compute hash from the initial leaf value up to the root node
     (0..depth).for_each(|level_index| {
-        levels.push(poseidon_hash_(&[levels[level_index]; 2]))
+        level_hashes.push(poseidon_hash_(&[level_hashes[level_index]; 2]))
     });
 
-    let nodes: Vec<Fr> = levels
-        .iter()
-        .rev()
-        .enumerate()
-        .flat_map(|(level_index, hash_value)| {
-            // per level, repeat the hash value (1 for root, 2 for level 1, ...)
-            repeat_n(hash_value, 1 << level_index)
-        })
-        .cloned()
-        .collect();
+    let query = r#"
+        INSERT INTO pgfr_mtree (index_in_mtree, value)
+        SELECT i, $1
+        FROM generate_series($2, $3) as i
+    "#;
 
-    let query = "INSERT INTO pgfr_mtree (index_in_mtree, value) VALUES ($1, $2::pgfr)";
     Spi::connect_mut(|client| {
-        for (index_in_mtree, node) in nodes.iter().enumerate() {
-            let index_in_mtree = index_in_mtree as i64;
+
+        for (level, hash) in level_hashes.iter().rev().enumerate() {
+            let level_start_index = (1i64 << level) - 1;
+            let level_end_index = (1i64 << (level + 1)) - 2;
+
             client.update(
                 query,
                 None,
                 &[
-                    index_in_mtree.into(),
-                    PgFr(*node).into()
-                ]).unwrap();
+                    // $1: The hash value for this entire level
+                    PgFr(*hash).into(),
+                    // $2: Start Index
+                    level_start_index.into(),
+                    // $3: End Index
+                    level_end_index.into(),
+                ]
+            ).expect(format!("Failed to insert hash {hash} at level {level}").as_str());
         }
     });
 }
@@ -62,6 +68,8 @@ fn pgfr_mtree_get_root() -> Result<Option<PgFr>, pgrx::spi::Error> {
 
 #[pg_extern(parallel_unsafe)]
 fn pgfr_mtree_set_leaf(depth: i16, index_in_mtree: i64, leaf_value: PgFr) -> Result<(), pgrx::spi::Error> {
+
+    // TODO: rename index_in_mtree to leaf_index ?_index ?
 
     let index = index_in_mtree as usize;
     let leaf_index_ = (1 << depth) + index - 1;
@@ -165,13 +173,104 @@ fn mtree_get_hashes(client: &SpiClient, start_index: usize, end_index: usize, to
     }
 }
 
+#[pg_extern(immutable, strict, parallel_safe)]
+fn pgfr_mtree_get_proof(depth: i16, leaf_index: i64) -> Vec<u8> {
 
+    let leaf_index_ = leaf_index as usize;
+    // TODO: rename to leaf_index or node_index ?
+    let mut index = (1 << depth) + leaf_index_ - 1;
+    // let mut proof_inner_ = Vec::with_capacity(depth as usize + 1);
+    // TODO: with_cap
+    let mut left_or_right = Vec::new();
+    let mut mtree_indexes = Vec::new();
+
+    // Traverse the tree from bottom to top (node_parent will return None at the root)
+    while let Some(parent) = node_parent(index) {
+
+        // TODO: explain the 'index & 1'
+        match index & 1 {
+            0 => {
+                let index_ = (index - 1) as i64;
+                // (1, index_)
+                left_or_right.push(1);
+                mtree_indexes.push(index_);
+            },
+            1 => {
+                let index_ = (index + 1) as i64;
+                // (0, index_)
+                left_or_right.push(0);
+                mtree_indexes.push(index_);
+            },
+            _ => unreachable!(),
+        };
+        index = parent
+    }
+
+    let mtree_indexes_len = mtree_indexes.len();
+
+    // Note: Using JOIN implicitly assumes that all nodes & leaves are initialized in the DB
+    //       This is doubled-checked after the query
+    // Note 2: UNNEST Expands an array into a set of rows. The array's elements are read out in storage order.
+    //         So using WITH ORDINALITY we can return the SELECT in the array order
+    let query = r#"
+        SELECT m.value
+        FROM UNNEST($1::bigint[]) WITH ORDINALITY AS t(req_idx, ord)
+        JOIN pgfr_mtree m
+            ON m.index_in_mtree = t.req_idx
+        ORDER BY t.ord ASC
+    "#;
+
+    let oid = PgBuiltInOids::INT8ARRAYOID.oid();
+
+    let values = Spi::connect(|client| {
+
+        let result = client.select(
+            query,
+            None,
+            &[
+                unsafe { DatumWithOid::new(mtree_indexes, oid.value()) },
+            ]
+        ).expect("Error executing SPI query");
+
+        result
+            .into_iter()
+            .map(|row| {
+                row.get::<PgFr>(1)
+                    .expect("no value")
+                    .expect("null value")
+                    .0
+            })
+            .collect::<Vec<Fr>>()
+
+    });
+
+    // Note: cf query notes about UNNEST + JOIN
+    if values.len() != mtree_indexes_len {
+        panic!("Merkle tree not fully init: Requested {} nodes but found only {}",
+               mtree_indexes_len, values.len());
+    }
+
+    let proof_data: Vec<(i64, Fr)> = left_or_right
+        .iter()
+        .zip(values)
+        .map(|(i, values)| {
+            (*i, values)
+        })
+        .collect();
+
+    // info!("proof_data: {:?}", proof_data);
+
+    let mut buffer = Vec::new();
+    proof_data.serialize_compressed(&mut buffer).expect("Serialization failed");
+    buffer
+}
 
 #[cfg(any(test, feature = "pg_test"))]
 #[pg_schema]
 mod tests {
 
     use std::str::FromStr;
+    use ark_serialize::CanonicalDeserialize;
     use super::*;
 
     #[pg_test]
@@ -228,7 +327,51 @@ mod tests {
         assert_eq!(root.0, Fr::from_str("9164054056146260648413073295070635933539618302378139976693739565479035405901").unwrap());
     }
 
+    #[pg_test]
+    fn test_pgfr_get_proof() {
+        let _res = Spi::run("
+            CREATE TABLE pgfr_mtree (index_in_mtree bigint, value pgfr);
+            CREATE UNIQUE INDEX pgfr_mtree_index ON pgfr_mtree (index_in_mtree);
+            "
+        );
 
+        pgfr_mtree_init(3);
 
+        {
+            let proof_bytes = pgfr_mtree_get_proof(3, 0);
+            let proof = Vec::<(i64, Fr)>::deserialize_compressed(proof_bytes.as_slice()).unwrap();
+            assert_eq!(
+                proof,
+                vec![
+                    (0, Fr::from(0)),
+                    (0, Fr::from_str("14744269619966411208579211824598458697587494354926760081771325075741142829156").unwrap()),
+                    (0, Fr::from_str("7423237065226347324353380772367382631490014989348495481811164164159255474657").unwrap())
+                ]);
+        }
+        {
+            let proof_bytes = pgfr_mtree_get_proof(3, 1);
+            let proof = Vec::<(i64, Fr)>::deserialize_compressed(proof_bytes.as_slice()).unwrap();
+            assert_eq!(
+                proof,
+                vec![
+                    (1, Fr::from(0)),
+                    (0, Fr::from_str("14744269619966411208579211824598458697587494354926760081771325075741142829156").unwrap()),
+                    (0, Fr::from_str("7423237065226347324353380772367382631490014989348495481811164164159255474657").unwrap())
+                ]);
+        }
+        {
+            let proof_bytes = pgfr_mtree_get_proof(3, 7);
+            let proof = Vec::<(i64, Fr)>::deserialize_compressed(proof_bytes.as_slice()).unwrap();
+
+            assert_eq!(
+                proof,
+                vec![
+                    (1, Fr::from(0)),
+                    (1, Fr::from_str("14744269619966411208579211824598458697587494354926760081771325075741142829156").unwrap()),
+                    (1, Fr::from_str("7423237065226347324353380772367382631490014989348495481811164164159255474657").unwrap())
+                ]);
+        }
+
+    }
 }
 
