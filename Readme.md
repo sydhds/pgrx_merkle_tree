@@ -53,4 +53,9 @@ psql:
 * Start the psql shell with the pg extension loaded and merkle tree initialized (depth = 20)
 * `cargo run -- DB_URL`
 * View queries:
-    * `RUST_LOG=sqlx=debug cargo run -- DB_URL` 
+    * `RUST_LOG=sqlx=debug cargo run -- DB_URL`
+
+## zerokit_ref
+
+Use Zerokit crate to compute reference values for the unit tests in pg_merkle_tree
+
