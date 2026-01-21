@@ -1743,6 +1743,7 @@ dependencies = [
  "once_cell",
  "pgrx",
  "pgrx-tests",
+ "serde",
  "static_assertions",
 ]
 
