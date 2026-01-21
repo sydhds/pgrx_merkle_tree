@@ -26,7 +26,7 @@ pg_test = [
 pgrx = "=0.16.1"
 ark-bn254 = { git = "https://github.com/arkworks-rs/algebra", features = ["std"]}
 ark-serialize = { git = "https://github.com/arkworks-rs/algebra", features = ["std", "serde", "serde_with"] }
-ark-ff = { git = "https://github.com/arkworks-rs/algebra", features = ["std"] }
+ark-ff = { git = "https://github.com/arkworks-rs/algebra", features = ["asm"] }
 once_cell = "1.21.3"
 num-bigint = "0.4.6"
 static_assertions = { version = "1.1.0", optional = true }

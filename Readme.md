@@ -33,7 +33,12 @@ A postgresql extension (using pgrx) to store a merkle tree in a Postgresql DB
 Get a psql shell:
 * `cargo pgrx run pg18`
   * `CREATE EXTENSION pg_merkle_tree;`
-  * 
+
+Note: 
+* To achieve the best performance, you can compile the extension with:
+  * `RUSTFLAGS="-C target-feature=+bmi2,+adx" cargo pgrx run pg18`
+  * This should optimize the Fr arithmetic code as mentioned in [Ark crate Readme](https://github.com/arkworks-rs/algebra#assembly-backend-for-field-arithmetic)
+
 
 Run tests:
 * `cargo pgrx test pg18`
