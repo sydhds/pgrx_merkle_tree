@@ -13,7 +13,7 @@ use crate::PgFr;
 use crate::poseidon::poseidon_hash_;
 use crate::merkle_tree_utils::{node_parent, first_child};
 
-#[pg_extern]
+#[pg_extern(parallel_unsafe)]
 fn pgfr_mtree_init(depth: i64) {
 
     let depth = depth as usize;
@@ -55,7 +55,7 @@ fn pgfr_mtree_init(depth: i64) {
     });
 }
 
-#[pg_extern]
+#[pg_extern(stable, strict, parallel_safe)]
 fn pgfr_mtree_get_root() -> Result<Option<PgFr>, pgrx::spi::Error> {
 
     let res: SpiResult<Option<PgFr>> = Spi::get_one_with_args(
@@ -173,7 +173,7 @@ fn mtree_get_hashes(client: &SpiClient, start_index: usize, end_index: usize, to
     }
 }
 
-#[pg_extern(immutable, strict, parallel_safe)]
+#[pg_extern(stable, strict, parallel_safe)]
 fn pgfr_mtree_get_proof(depth: i16, leaf_index: i64) -> Vec<u8> {
 
     let leaf_index_ = leaf_index as usize;
@@ -371,7 +371,6 @@ mod tests {
                     (1, Fr::from_str("7423237065226347324353380772367382631490014989348495481811164164159255474657").unwrap())
                 ]);
         }
-
     }
 }
 
