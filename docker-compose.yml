@@ -1,0 +1,16 @@
+services:
+  db:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    environment:
+      POSTGRES_USER: sydh
+      POSTGRES_PASSWORD: sydh
+      POSTGRES_DB: pgrx_merkle_tree
+    ports:
+      - "28818:5432"  # Maps host 28818 to container 5432
+    volumes:
+      - pg_data:/var/lib/postgresql
+
+volumes:
+  pg_data:

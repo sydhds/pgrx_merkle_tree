@@ -59,6 +59,25 @@ impl PgHasArrayType for PgFrStruct {
     }
 }
 
+#[derive(Default, Debug)]
+pub struct Proof {
+    pub inner: Vec<(i64, Fr)>
+}
+
+impl Type<Postgres> for Proof {
+    fn type_info() -> PgTypeInfo {
+        PgTypeInfo::with_name("bytea")
+    }
+}
+
+impl<'r> Decode<'r, Postgres> for Proof {
+    fn decode(value: PgValueRef<'r>) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let bytes = <&[u8] as Decode<Postgres>>::decode(value)?;
+        let inner = Vec::<(i64, Fr)>::deserialize_compressed(bytes)?;
+        Ok(Proof { inner })
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), sqlx::Error> {
     env_logger::init();
@@ -79,13 +98,14 @@ async fn main() -> Result<(), sqlx::Error> {
 
     println!("pgfr oid: {:?} - pgfr array oid: {:?}", PGFR_OID, PGFR_ARRAY_OID);
 
+    const DEPTH: i16 = 20;
+
     // Basic queries
     // Note: updating a value manually like this breaks the merkle tree (hashes not updated)
     //       pgfr_mtree_set_leaf should be used instead
 
     let v = PgFrStruct { inner: Fr::from(4242) };
     // Compute the 'real' leaf index
-    const DEPTH: i16 = 20;
     let leaf_index_7_ = (1 << DEPTH) + 7 - 1;
     let leaf_index_7 = leaf_index_7_ as i64;
 
@@ -114,11 +134,12 @@ async fn main() -> Result<(), sqlx::Error> {
         .await?;
 
     // ~Benchmarking set_leaf
-
+    println!("Benchmarking set_leaf...");
     bench_set_leaf(pool.clone(), DEPTH).await?;
 
     // ~Benchmarking get_proof
-    // TODO
+    println!("Benchmarking get_proof...");
+    bench_get_proof(pool.clone(), DEPTH).await?;
 
     Ok(())
 }
@@ -184,4 +205,46 @@ async fn bench_set_leaf(pool: Pool<Postgres>, depth: i16) -> Result<(), sqlx::Er
 
     Ok(())
 
+}
+
+async fn bench_get_proof(pool: Pool<Postgres>, depth: i16) -> Result<(), sqlx::Error> {
+    let mut conn = pool.acquire().await?;
+
+    // Warmup
+    let row: (Proof,) = sqlx::query_as("SELECT pgfr_mtree_get_proof($1, $2)")
+        .bind(depth)
+        .bind(0i64)
+        .fetch_one(&pool)
+        .await?;
+    let row: (Proof,) = sqlx::query_as("SELECT pgfr_mtree_get_proof($1, $2)")
+        .bind(depth)
+        .bind(0i64)
+        .fetch_one(&pool)
+        .await?;
+
+    // ~Benchmark
+    {
+        let start = std::time::Instant::now();
+        let row: (Proof,) = sqlx::query_as("SELECT pgfr_mtree_get_proof($1, $2)")
+            .bind(depth)
+            .bind(0i64)
+            .fetch_one(&pool)
+            .await?;
+        let elapsed = start.elapsed();
+        println!("elapsed: {:?} secs ({} ms)", elapsed.as_secs_f64(), elapsed.as_millis());
+        // println!("[get proof] res: {:?}", row);
+    }
+    {
+        let start = std::time::Instant::now();
+        let row: (Proof,) = sqlx::query_as("SELECT pgfr_mtree_get_proof($1, $2)")
+            .bind(depth)
+            .bind(7i64)
+            .fetch_one(&pool)
+            .await?;
+
+        let elapsed = start.elapsed();
+        println!("elapsed: {:?} secs ({} ms)", elapsed.as_secs_f64(), elapsed.as_millis());
+        // println!("[get proof] res: {:?}", row);
+    }
+    Ok(())
 }
