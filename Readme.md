@@ -44,6 +44,14 @@ Run tests:
 * `cargo pgrx test pg18`
 * `cargo pgrx test pg18 test_pgfr_is_32_bytes`
 
+Using Docker:
+* `docker-compose up --build`
+  * Cleanup: `docker-compose down -v` 
+* `psql -h localhost -p 28818 -U sydh -d pgrx_merkle_tree`
+* Run sql_binary_example:
+  * `cd sqlx_binary_protocol`
+  * `cargo run -- postgres://sydh:sydh@localhost:28818/pgrx_merkle_tree` 
+
 ### Helpers
 
 psql:

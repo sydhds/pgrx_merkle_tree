@@ -1,5 +1,10 @@
 # Stage 1: build the pg extension
-FROM ubuntu:25.10 as builder
+FROM rust:1.91-bookworm AS builder
+
+# PostgreSQL Apt Repository
+RUN apt-get update && apt-get install -y lsb-release wget gnupg2 \
+    && echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
+    && wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
 
 RUN apt-get update && apt-get install -y \
     curl \
@@ -36,4 +41,4 @@ COPY --from=builder \
      /usr/share/postgresql/18/extension/
 
 # COPY init script
-COPY docker/init-db.sh /docker-entrypoint-initdb.d/init-db-extension.sh
+COPY docker/init-db-extension.sh /docker-entrypoint-initdb.d/init-db-extension.sh
